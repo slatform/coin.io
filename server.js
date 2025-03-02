@@ -5,7 +5,7 @@ const wss = new WebSocket.Server({ port: 8080 });
 let players = {};
 let goldCoins = [];
 
-// Top 200 coins (sample subset for now)
+// Sample top coins (expandable to 200 later)
 const topCoins = {
     'BTC': { color: '#F7931A', symbol: '₿' },
     'ETH': { color: '#627EEA', symbol: 'Ξ' },
@@ -18,7 +18,7 @@ const topCoins = {
 function spawnGoldCoin() {
     goldCoins.push({
         id: `coin-${Date.now()}-${Math.random()}`,
-        x: Math.random() * 2000, // Map size: 2000x2000
+        x: Math.random() * 2000,
         y: Math.random() * 2000,
         mass: 5
     });
@@ -29,6 +29,9 @@ for (let i = 0; i < 50; i++) spawnGoldCoin();
 
 wss.on('connection', (ws) => {
     const id = Date.now();
+    console.log(`Player ${id} connected`);
+
+    // Default player state (updated on init)
     players[id] = {
         x: Math.random() * 2000,
         y: Math.random() * 2000,
@@ -38,11 +41,9 @@ wss.on('connection', (ws) => {
         symbol: topCoins['BTC'].symbol
     };
 
-    // Handle messages from clients
     ws.on('message', (message) => {
         const data = JSON.parse(message);
         if (data.type === 'init') {
-            // Set ticker and appearance
             const ticker = data.ticker.toUpperCase();
             players[id].ticker = ticker;
             if (topCoins[ticker]) {
@@ -52,20 +53,21 @@ wss.on('connection', (ws) => {
                 players[id].color = '#FFD700'; // Default gold
                 players[id].symbol = '$';
             }
+            console.log(`Player ${id} initialized as ${ticker}`);
         } else if (data.type === 'move') {
-            // Update position
             players[id].x = data.x;
             players[id].y = data.y;
         }
     });
 
     ws.on('close', () => {
+        console.log(`Player ${id} disconnected`);
         delete players[id];
     });
 
     // Game loop
     setInterval(() => {
-        // Check player vs. gold coin collisions
+        // Player vs. gold coin collisions
         for (let playerId in players) {
             const player = players[playerId];
             goldCoins = goldCoins.filter(coin => {
@@ -73,13 +75,13 @@ wss.on('connection', (ws) => {
                 const dy = player.y - coin.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 if (distance < player.mass + coin.mass) {
-                    player.mass += coin.mass; // Grow
-                    return false; // Remove collected coin
+                    player.mass += coin.mass;
+                    return false;
                 }
                 return true;
             });
 
-            // Check player vs. player collisions
+            // Player vs. player collisions
             for (let otherId in players) {
                 if (playerId === otherId) continue;
                 const other = players[otherId];
@@ -87,8 +89,8 @@ wss.on('connection', (ws) => {
                 const dy = player.y - other.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 if (distance < player.mass + other.mass && player.mass > other.mass * 1.2) {
-                    player.mass += other.mass; // Absorb
-                    delete players[otherId]; // Remove eaten player
+                    player.mass += other.mass;
+                    delete players[otherId];
                     wss.clients.forEach(client => {
                         if (client.readyState === WebSocket.OPEN) {
                             client.send(JSON.stringify({ type: 'respawn', id: otherId }));
@@ -98,10 +100,10 @@ wss.on('connection', (ws) => {
             }
         }
 
-        // Respawn gold coins if low
+        // Respawn gold coins
         if (goldCoins.length < 30) spawnGoldCoin();
 
-        // Send game state to all clients
+        // Send game state
         const gameState = { players, goldCoins };
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
